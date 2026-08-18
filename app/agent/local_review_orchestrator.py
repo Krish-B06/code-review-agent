@@ -16,6 +16,46 @@ class LocalReviewOrchestrator:
         self.security_analysis_tool = SecurityAnalysisTool()
         self.test_runner_tool = TestRunnerTool()
 
+    def _group_and_summarize_findings(self, findings):
+        """Group similar findings for clarity and reduce noise."""
+        if not findings:
+            return []
+
+        # Group by issue type
+        grouped = {}
+        for finding in findings:
+            # Extract the issue type (e.g., "missing return type hint")
+            if "missing return type hint" in finding:
+                key = "Missing Type Hints"
+                if key not in grouped:
+                    grouped[key] = []
+                # Extract function name
+                func_name = finding.split("`")[1] if "`" in finding else "unknown"
+                line_num = finding.split(":")[1] if ":" in finding else "?"
+                grouped[key].append(func_name)
+
+            elif "missing docstring" in finding:
+                key = "Missing Docstrings"
+                if key not in grouped:
+                    grouped[key] = []
+                func_name = finding.split("`")[1] if "`" in finding else "unknown"
+                grouped[key].append(func_name)
+
+        # Create summary findings
+        summary = []
+        if "Missing Type Hints" in grouped:
+            funcs = ", ".join(set(grouped["Missing Type Hints"]))
+            summary.append(
+                f"**Missing Return Type Hints** | Add `-> ReturnType` to: {funcs}"
+            )
+        if "Missing Docstrings" in grouped:
+            funcs = ", ".join(set(grouped["Missing Docstrings"]))
+            summary.append(
+                f"**Missing Docstrings** | Add docstrings to: {funcs}"
+            )
+
+        return summary
+
     def _analyze_code_patterns(self, filepath):
         """Intelligent pattern analysis with exact line numbers."""
         findings = []
@@ -41,38 +81,47 @@ class LocalReviewOrchestrator:
                     )
 
             # Check for missing type hints on specific functions
+            missing_type_hints = []
             for line_num, line in enumerate(lines, 1):
                 if re.match(r"\s*def\s+\w+\s*\(", line):
                     if "->" not in line and "def " in line:
                         func_name = re.search(r"def\s+(\w+)", line)
                         if func_name:
-                            findings.append(
-                                f"**{filepath}:{line_num}** | Function `{func_name.group(1)}()` missing return type hint: `-> <type>`"
-                            )
+                            missing_type_hints.append(func_name.group(1))
+
+            if missing_type_hints:
+                findings.append(
+                    f"**Type Hints Missing** | Add return types to: `{', '.join(missing_type_hints)}`"
+                )
 
             # Check for bare except blocks with exact line
+            except_issues = []
             for line_num, line in enumerate(lines, 1):
                 if re.search(r"except\s*:", line):
-                    findings.append(
-                        f"**{filepath}:{line_num}** | Bare `except:` clause - specify exception type: `except ValueError as e:`"
-                    )
+                    except_issues.append(f"line {line_num}")
                 elif "except Exception" in line:
-                    findings.append(
-                        f"**{filepath}:{line_num}** | Generic `Exception` catch - catch specific exceptions instead"
-                    )
+                    except_issues.append(f"line {line_num} (generic Exception)")
+
+            if except_issues:
+                findings.append(
+                    f"**Exception Handling** | Fix bare except clauses at {', '.join(except_issues)}"
+                )
 
             # Check for missing docstrings
+            missing_docs = []
             for line_num, line in enumerate(lines, 1):
                 if re.match(r"\s*def\s+\w+", line):
-                    # Check if next non-empty line is a docstring
                     next_lines = lines[line_num : min(line_num + 3, len(lines))]
                     has_docstring = any('"""' in l or "'''" in l for l in next_lines)
                     if not has_docstring:
                         func_name = re.search(r"def\s+(\w+)", line)
                         if func_name:
-                            findings.append(
-                                f"**{filepath}:{line_num}** | Function `{func_name.group(1)}()` missing docstring"
-                            )
+                            missing_docs.append(func_name.group(1))
+
+            if missing_docs:
+                findings.append(
+                    f"**Missing Docstrings** | Add to: `{', '.join(missing_docs)}`"
+                )
 
         except Exception as e:
             pass
@@ -80,69 +129,84 @@ class LocalReviewOrchestrator:
         return findings
 
     def _analyze_diff_quality(self, diff):
-        """Analyze the diff for architectural concerns with locations."""
+        """Analyze the diff for architectural concerns - grouped summary."""
         suggestions = []
+        print_issues = []
+        todo_issues = []
 
         for line_num, line in enumerate(diff.split("\n"), 1):
-            # TODO/FIXME comments
+            # Collect print statements
+            if "print(" in line and line.startswith("+"):
+                print_issues.append(line_num)
+
+            # Collect TODO/FIXME
             if ("TODO" in line or "FIXME" in line) and line.startswith("+"):
-                suggestions.append(
-                    f"**Diff line {line_num}** | Remove TODO/FIXME - implement now or open a GitHub issue"
-                )
+                todo_issues.append(line_num)
 
             # Import star
             if "import *" in line and line.startswith("+"):
                 module = re.search(r"from\s+(\S+)\s+import\s+\*", line)
                 if module:
                     suggestions.append(
-                        f"**Diff line {line_num}** | Avoid `import *` from `{module.group(1)}` - use explicit imports"
+                        f"**Avoid wildcard imports** | Use explicit imports instead of `from {module.group(1)} import *`"
                     )
 
-            # Print statements
-            if "print(" in line and line.startswith("+"):
-                suggestions.append(
-                    f"**Diff line {line_num}** | Replace `print()` with logging module: `import logging; logging.info(...)`"
-                )
+        # Group print statements
+        if print_issues:
+            sample = f"line {print_issues[0]}" if len(print_issues) == 1 else f"{len(print_issues)} lines"
+            suggestions.append(
+                f"**Replace print() with logging** | Found {len(print_issues)} print() calls ({sample}) - use `import logging` instead"
+            )
+
+        # Group TODO/FIXME
+        if todo_issues:
+            sample = f"line {todo_issues[0]}" if len(todo_issues) == 1 else f"{len(todo_issues)} locations"
+            suggestions.append(
+                f"**Remove TODO/FIXME comments** | Implement immediately or open GitHub issues ({sample})"
+            )
 
         large_file_additions = len([l for l in diff.split("\n") if l.startswith("+")])
         if large_file_additions > 100:
             suggestions.append(
-                f"**PR Size** | Large diff with {large_file_additions} additions - consider breaking into multiple smaller PRs"
+                f"**Consider smaller PRs** | This PR has {large_file_additions} additions - break into smaller focused changes"
             )
 
         return suggestions
 
     def format_review_comment(self, review):
-        suggested_fixes = "\n".join(
-            f"- {item}" for item in review.get("suggested_fixes", [])
-        )
-        if not suggested_fixes:
-            suggested_fixes = "- ✅ No issues - code looks good!"
-
+        """Format review as concise, scannable markdown."""
         code_findings = review.get("code_findings", [])
         security_findings = review.get("security_findings", [])
+        suggested_fixes = review.get("suggested_fixes", [])
 
-        code_section = (
-            "\n".join(f"- {f}" for f in code_findings)
-            if code_findings
-            else "- ✅ No code quality issues detected"
-        )
-        security_section = (
-            "\n".join(f"- {f}" for f in security_findings)
-            if security_findings
-            else "- ✅ No security concerns detected"
-        )
+        # Build sections
+        sections = []
+
+        # Code Quality
+        if code_findings:
+            sections.append("### Code Quality\n" + "\n".join(f"- {f}" for f in code_findings))
+        else:
+            sections.append("### Code Quality\n- ✅ No issues detected")
+
+        # Security
+        if security_findings:
+            sections.append("### Security\n" + "\n".join(f"- {f}" for f in security_findings))
+        else:
+            sections.append("### Security\n- ✅ No concerns detected")
+
+        # Recommendations
+        if suggested_fixes:
+            sections.append("### Action Items\n" + "\n".join(f"- {f}" for f in suggested_fixes))
+
+        # Test Status
+        sections.append(f"### Tests\n- **{review.get('validation_status', 'unknown').upper()}** ✅")
+
+        body = "\n\n".join(sections)
 
         return (
-            "## Code Review Summary\n\n"
+            f"## Code Review\n\n"
             f"{review.get('summary', '')}\n\n"
-            "### Code Quality Issues\n"
-            f"{code_section}\n\n"
-            "### Security Analysis\n"
-            f"{security_section}\n\n"
-            "### Recommendations\n"
-            f"{suggested_fixes}\n\n"
-            f"### Test Status\n**{review.get('validation_status', 'unknown').upper()}** ✅"
+            f"{body}"
         )
 
     def review(self):
