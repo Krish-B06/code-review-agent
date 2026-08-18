@@ -3,21 +3,21 @@ import subprocess
 
 class GitDiffTool:
     def get_diff(self, base_branch="main"):
-        # Try to use origin/base_branch for GitHub Actions compatibility
-        remote_branch = f"origin/{base_branch}"
-        
-        # First, ensure the base branch is fetched
+        # Ensure the base branch is fetched for GitHub Actions compatibility
         subprocess.run(
             ["git", "fetch", "origin", base_branch, "--depth=1"],
             capture_output=True,
             text=True,
         )
         
+        remote_branch = f"origin/{base_branch}"
+        
+        # Use two-dot diff which works in PR merge commit contexts
         result = subprocess.run(
             [
                 "git",
                 "diff",
-                f"{remote_branch}...HEAD",
+                f"{remote_branch}..HEAD",
             ],
             capture_output=True,
             text=True,
