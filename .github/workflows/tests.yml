@@ -1,13 +1,22 @@
-name: Run Tests
+name: Run Tests and Review
 
 on:
   push:
     branches:
-      - main
+      - '**'
 
   pull_request:
     branches:
       - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   test:
@@ -27,3 +36,48 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+  code_review:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch base branch for diff review
+        run: git fetch origin main --depth=1
+
+      - name: Run code review agent
+        run: |
+          python - <<'PY'
+          import json
+
+          from app.agent.local_review_orchestrator import LocalReviewOrchestrator
+
+          review = LocalReviewOrchestrator().review()
+
+          print(json.dumps({
+              "summary": review.get("summary"),
+              "suggested_fixes": review.get("suggested_fixes", []),
+              "validation_status": review.get("validation_status"),
+          }, indent=2))
+
+          with open("review_comment.md", "w", encoding="utf-8") as fh:
+              fh.write(review.get("comment", ""))
+          PY
+
+      - name: Comment PR with review result
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.number != '' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: review_comment.md

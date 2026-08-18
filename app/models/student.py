@@ -7,9 +7,8 @@ class Student:
     def calculate_grade(self):
         if self.marks >= 90:
             return "A"
-        elif self.marks >= 75:
+        if self.marks >= 75:
             return "B"
-        elif self.marks >= 60:
+        if self.marks >= 60:
             return "C"
-        else:
-            return "D"
+        return "D"
