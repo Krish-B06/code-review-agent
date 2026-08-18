@@ -48,13 +48,18 @@ jobs:
         run: git fetch origin main --depth=1
 
       - name: Run code review agent
-        if: ${{ secrets.OPENAI_API_KEY != '' }}
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python - <<'PY'
           import json
+          import os
+
           from app.agent.review_orchestrator import ReviewOrchestrator
+
+          if not os.getenv("OPENAI_API_KEY"):
+              print("OPENAI_API_KEY not configured; skipping review.")
+              raise SystemExit(0)
 
           review = ReviewOrchestrator().review()
           print(json.dumps({
@@ -68,8 +73,41 @@ jobs:
           PY
 
       - name: Comment PR with review result
-        if: ${{ github.event_name == 'pull_request' && secrets.OPENAI_API_KEY != '' }}
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body-path: review_comment.md
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ] || [ -z "$GITHUB_TOKEN" ]; then
+            echo "Missing OPENAI_API_KEY or GITHUB_TOKEN; skipping PR comment."
+            exit 0
+          fi
+
+          if [ ! -f review_comment.md ]; then
+            echo "No review comment file generated; skipping PR comment."
+            exit 0
+          fi
+
+          python - <<'PY'
+          import os
+          import requests
+
+          with open("review_comment.md", "r", encoding="utf-8") as fh:
+              body = fh.read()
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          ref = os.environ["GITHUB_REF"]
+          pr_number = ref.split("/")[-2]
+          token = os.environ["GITHUB_TOKEN"]
+          url = f"https://api.github.com/repos/{repo}/issues/{pr_number}/comments"
+
+          response = requests.post(
+              url,
+              headers={
+                  "Authorization": f"Bearer {token}",
+                  "Accept": "application/vnd.github+json",
+              },
+              json={"body": body},
+          )
+          response.raise_for_status()
+          PY
