@@ -110,3 +110,16 @@ def test_list_students():
     students = response.json()
 
     assert len(students) >= 1
+
+
+def test_add_student_with_invalid_marks():
+    response = client.post(
+        "/students/",
+        json={
+            "student_id": 6,
+            "name": "Frank",
+            "marks": 120,
+        },
+    )
+
+    assert response.status_code == 400

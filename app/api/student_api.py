@@ -30,11 +30,17 @@ def student_to_dict(student):
 
 @router.post("/")
 def add_student(request: StudentRequest):
-    student = student_service.add_student(
-        request.student_id,
-        request.name,
-        request.marks,
-    )
+    try:
+        student = student_service.add_student(
+            request.student_id,
+            request.name,
+            request.marks,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
 
     return student_to_dict(student)
 
@@ -57,10 +63,16 @@ def update_marks(
     student_id: int,
     request: MarksUpdateRequest,
 ):
-    student = student_service.update_marks(
-        student_id,
-        request.marks,
-    )
+    try:
+        student = student_service.update_marks(
+            student_id,
+            request.marks,
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error),
+        )
 
     if student is None:
         raise HTTPException(
