@@ -57,17 +57,13 @@ jobs:
         run: git fetch origin main --depth=1
 
       - name: Run code review agent
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           python - <<'PY'
           import json
-          import os
 
-          from app.agent.review_orchestrator import ReviewOrchestrator
+          from app.agent.local_review_orchestrator import LocalReviewOrchestrator
 
-          provider_name = "openai" if os.getenv("OPENAI_API_KEY") else "mock"
-          review = ReviewOrchestrator(provider_name=provider_name).review()
+          review = LocalReviewOrchestrator().review()
 
           print(json.dumps({
               "summary": review.get("summary"),

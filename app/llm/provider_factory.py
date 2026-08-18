@@ -1,5 +1,6 @@
 from app.llm.llm_provider import LLMProvider
 from app.llm.openai_provider import OpenAIProvider
+from app.llm.anthropic_provider import AnthropicProvider
 
 
 class MockLLMProvider(LLMProvider):
@@ -21,6 +22,12 @@ class ProviderFactory:
         if provider_name == "openai":
             try:
                 return OpenAIProvider(**kwargs)
+            except ValueError:
+                return MockLLMProvider()
+
+        if provider_name == "anthropic":
+            try:
+                return AnthropicProvider(**kwargs)
             except ValueError:
                 return MockLLMProvider()
 
