@@ -66,11 +66,9 @@ jobs:
 
           from app.agent.review_orchestrator import ReviewOrchestrator
 
-          if not os.getenv("OPENAI_API_KEY"):
-              print("OPENAI_API_KEY not configured; skipping review.")
-              raise SystemExit(0)
+          provider_name = "openai" if os.getenv("OPENAI_API_KEY") else "mock"
+          review = ReviewOrchestrator(provider_name=provider_name).review()
 
-          review = ReviewOrchestrator().review()
           print(json.dumps({
               "summary": review.get("summary"),
               "suggested_fixes": review.get("suggested_fixes", []),
@@ -84,11 +82,10 @@ jobs:
       - name: Comment PR with review result
         if: ${{ github.event_name == 'pull_request' }}
         env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ -z "$OPENAI_API_KEY" ] || [ -z "$GITHUB_TOKEN" ]; then
-            echo "Missing OPENAI_API_KEY or GITHUB_TOKEN; skipping PR comment."
+          if [ -z "$GITHUB_TOKEN" ]; then
+            echo "Missing GITHUB_TOKEN; skipping PR comment."
             exit 0
           fi
 

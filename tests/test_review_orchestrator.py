@@ -1,5 +1,6 @@
 from app.agent.review_orchestrator import ReviewOrchestrator
 from app.llm.llm_provider import LLMProvider
+from app.llm.provider_factory import MockLLMProvider
 
 
 class FakeLLMProvider(LLMProvider):
@@ -40,3 +41,15 @@ def test_review_orchestrator_uses_injected_llm(monkeypatch):
     assert review["validation_status"] == "passed"
     assert "diff --git" in review["diff"]
     assert review["code_findings"] == [{"message": "Naming issue found"}]
+
+
+def test_provider_factory_uses_mock_when_api_key_missing(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    provider = MockLLMProvider()
+
+    result = provider.generate("test prompt")
+
+    assert "summary" in result
+    assert "suggested_fixes" in result
+    assert "validation_status" in result
