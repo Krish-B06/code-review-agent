@@ -1,3 +1,5 @@
+import json
+
 from app.llm.provider_factory import ProviderFactory
 from app.tools.git_diff_tool import GitDiffTool
 from app.tools.code_analysis_tool import CodeAnalysisTool
@@ -16,12 +18,30 @@ class ReviewOrchestrator:
     def build_review_prompt(self, diff, code_findings, security_findings, test_results):
         return (
             "You are a senior code reviewer. Review the following pull request data.\n\n"
+            "Return valid JSON only with exactly these keys: "
+            "summary, suggested_fixes, validation_status.\n\n"
             f"Diff:\n{diff}\n\n"
             f"Code findings:\n{code_findings}\n\n"
             f"Security findings:\n{security_findings}\n\n"
             f"Test results:\n{test_results}\n\n"
-            "Provide a concise review summary with three sections: "
-            "Overall assessment, Risks, and Recommended next steps."
+            "summary: one crisp sentence.\n"
+            "suggested_fixes: list of concise fix actions.\n"
+            "validation_status: 'passed' if tests pass, otherwise 'failed'."
+        )
+
+    def format_review_comment(self, review):
+        suggested_fixes = "\n".join(
+            f"- {item}" for item in review.get("suggested_fixes", [])
+        )
+        if not suggested_fixes:
+            suggested_fixes = "- None"
+
+        return (
+            "## Code Review Summary\n\n"
+            f"{review.get('summary', '')}\n\n"
+            "### Suggested fixes\n"
+            f"{suggested_fixes}\n\n"
+            f"### Validation status\n{review.get('validation_status', 'failed')}"
         )
 
     def review(self):
@@ -44,15 +64,22 @@ class ReviewOrchestrator:
             security_findings,
             test_results,
         )
-        llm_review = self.llm.generate(prompt)
 
-        return {
+        raw_review = self.llm.generate(prompt)
+        parsed_review = json.loads(raw_review)
+
+        review_result = {
             "diff": diff,
             "code_findings": code_findings,
             "security_findings": security_findings,
             "test_results": test_results,
-            "llm_review": llm_review,
+            "summary": parsed_review.get("summary", ""),
+            "suggested_fixes": parsed_review.get("suggested_fixes", []),
+            "validation_status": parsed_review.get("validation_status", "failed"),
+            "llm_review": parsed_review.get("summary", ""),
         }
+        review_result["comment"] = self.format_review_comment(review_result)
+        return review_result
 
 
 if __name__ == "__main__":

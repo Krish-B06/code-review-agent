@@ -5,9 +5,13 @@ class StudentService:
     def __init__(self):
         self.students = {}
 
-    def add_student(self, student_id, name, marks):
+    @staticmethod
+    def validate_marks(marks):
         if marks < 0 or marks > 100:
             raise ValueError("Marks must be between 0 and 100")
+
+    def add_student(self, student_id, name, marks):
+        self.validate_marks(marks)
 
         student = Student(student_id, name, marks)
         self.students[student_id] = student
@@ -22,8 +26,7 @@ class StudentService:
         if student is None:
             return None
 
-        if marks < 0 or marks > 100:
-            raise ValueError("Marks must be between 0 and 100")
+        self.validate_marks(marks)
 
         student.marks = marks
         return student

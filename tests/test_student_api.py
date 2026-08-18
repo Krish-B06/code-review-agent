@@ -1,9 +1,22 @@
+import pytest
+import pytest
 from fastapi.testclient import TestClient
 
+from app.llm.openai_provider import OpenAIProvider
+from app.llm.provider_factory import ProviderFactory
 from app.main import app
+from app.services.student_service import StudentService
 
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def reset_student_service():
+    student_service = StudentService()
+    client.app.dependency_overrides = {}
+    from app.api.student_api import student_service as api_service
+    api_service.students = student_service.students
 
 
 def test_add_student():
@@ -123,3 +136,16 @@ def test_add_student_with_invalid_marks():
     )
 
     assert response.status_code == 400
+
+
+def test_provider_factory_returns_openai_provider(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+    provider = ProviderFactory.create("openai")
+
+    assert isinstance(provider, OpenAIProvider)
+
+
+def test_provider_factory_rejects_unknown_provider():
+    with pytest.raises(ValueError, match="Unsupported LLM provider"):
+        ProviderFactory.create("unknown-provider")
