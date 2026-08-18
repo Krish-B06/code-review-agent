@@ -1,4 +1,5 @@
 import json
+import re
 
 from app.llm.provider_factory import ProviderFactory
 from app.tools.git_diff_tool import GitDiffTool
@@ -28,6 +29,27 @@ class ReviewOrchestrator:
             "suggested_fixes: list of concise fix actions.\n"
             "validation_status: 'passed' if tests pass, otherwise 'failed'."
         )
+
+    def parse_llm_review(self, raw_review):
+        if not raw_review:
+            return {}
+
+        cleaned = raw_review.strip()
+        match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1)
+
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            start = cleaned.find("{")
+            end = cleaned.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                try:
+                    return json.loads(cleaned[start : end + 1])
+                except json.JSONDecodeError:
+                    return {}
+            return {}
 
     def format_review_comment(self, review):
         suggested_fixes = "\n".join(
@@ -66,7 +88,7 @@ class ReviewOrchestrator:
         )
 
         raw_review = self.llm.generate(prompt)
-        parsed_review = json.loads(raw_review)
+        parsed_review = self.parse_llm_review(raw_review)
 
         review_result = {
             "diff": diff,

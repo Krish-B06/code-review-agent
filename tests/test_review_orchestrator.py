@@ -43,6 +43,49 @@ def test_review_orchestrator_uses_injected_llm(monkeypatch):
     assert review["code_findings"] == [{"message": "Naming issue found"}]
 
 
+def test_review_orchestrator_handles_markdown_json_from_llm(monkeypatch):
+    class MarkdownJSONLLM(LLMProvider):
+        def generate(self, prompt):
+            return '''```json
+{
+  "summary": "Looks ready with minor cleanup.",
+  "suggested_fixes": [
+    "Tighten validation on marks",
+    "Keep the student list service consistent"
+  ],
+  "validation_status": "passed"
+}
+```'''
+
+    monkeypatch.setattr(
+        "app.agent.review_orchestrator.GitDiffTool.get_diff",
+        lambda self: "diff --git a/x b/x\n+new code",
+    )
+    monkeypatch.setattr(
+        "app.agent.review_orchestrator.CodeAnalysisTool.analyze_file",
+        lambda self, path: [],
+    )
+    monkeypatch.setattr(
+        "app.agent.review_orchestrator.SecurityAnalysisTool.analyze_file",
+        lambda self, path: [],
+    )
+    monkeypatch.setattr(
+        "app.agent.review_orchestrator.TestRunnerTool.run_tests",
+        lambda self: {"passed": True, "failed": 0},
+    )
+
+    orchestrator = ReviewOrchestrator(llm=MarkdownJSONLLM())
+    review = orchestrator.review()
+
+    assert review["summary"] == "Looks ready with minor cleanup."
+    assert review["suggested_fixes"] == [
+        "Tighten validation on marks",
+        "Keep the student list service consistent",
+    ]
+    assert review["validation_status"] == "passed"
+    assert "## Code Review Summary" in review["comment"]
+
+
 def test_provider_factory_uses_mock_when_api_key_missing(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
