@@ -13,7 +13,10 @@ class StudentService:
     def add_student(self, student_id, name, marks):
         self.validate_marks(marks)
 
+        #student = Student(student_id, name, marks)
+        print("DEBUG: adding student")
         student = Student(student_id, name, marks)
+
         self.students[student_id] = student
         return student
 
