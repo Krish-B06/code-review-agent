@@ -31,8 +31,8 @@ class StudentService:
 
         self.validate_marks(marks)
 
-        #student.marks = marks
-        student.mark = 0
+        student.marks = marks
+        #student.mark = 0
         return student
 
     def calculate_grade(self, student_id):
