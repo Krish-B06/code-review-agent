@@ -1,12 +1,12 @@
-
 import re
 from pathlib import Path
 
 
 class LocalReviewOrchestrator:
-    """Intelligent code review using local analysis - no API keys required."""
+    """Run a local, tool-based code review."""
 
     def __init__(self):
+        """Initialize the code review tools."""
         from app.tools.git_diff_tool import GitDiffTool
         from app.tools.code_analysis_tool import CodeAnalysisTool
         from app.tools.security_analysis_tool import SecurityAnalysisTool
@@ -18,7 +18,7 @@ class LocalReviewOrchestrator:
         self.test_runner_tool = TestRunnerTool()
 
     def _group_and_summarize_findings(self, findings):
-        """Group similar findings for clarity and reduce noise."""
+        """Group common findings to reduce review noise."""
         if not findings:
             return []
 
@@ -26,443 +26,461 @@ class LocalReviewOrchestrator:
 
         for finding in findings:
             if "missing return type hint" in finding:
-                key = "Missing Type Hints"
-                if key not in grouped:
-                    grouped[key] = []
-
-                func_name = (
-                    finding.split("`")[1]
-                    if "`" in finding
-                    else "unknown"
+                grouped.setdefault("Missing Type Hints", []).append(
+                    self._extract_function_name(finding)
                 )
-                grouped[key].append(func_name)
 
             elif "missing docstring" in finding:
-                key = "Missing Docstrings"
-                if key not in grouped:
-                    grouped[key] = []
-
-                func_name = (
-                    finding.split("`")[1]
-                    if "`" in finding
-                    else "unknown"
+                grouped.setdefault("Missing Docstrings", []).append(
+                    self._extract_function_name(finding)
                 )
-                grouped[key].append(func_name)
 
         summary = []
 
         if "Missing Type Hints" in grouped:
-            funcs = ", ".join(set(grouped["Missing Type Hints"]))
+            functions = ", ".join(
+                sorted(set(grouped["Missing Type Hints"]))
+            )
             summary.append(
-                f"**Missing Return Type Hints** | "
-                f"Add `-> ReturnType` to: {funcs}"
+                f"**Missing return type hints**: {functions}"
             )
 
         if "Missing Docstrings" in grouped:
-            funcs = ", ".join(set(grouped["Missing Docstrings"]))
+            functions = ", ".join(
+                sorted(set(grouped["Missing Docstrings"]))
+            )
             summary.append(
-                f"**Missing Docstrings** | Add docstrings to: {funcs}"
+                f"**Missing docstrings**: {functions}"
             )
 
         return summary
 
+    @staticmethod
+    def _extract_function_name(finding):
+        """Extract a function name from a finding."""
+        if "`" in finding:
+            parts = finding.split("`")
+            if len(parts) > 1:
+                return parts[1]
+
+        return "unknown"
+
     def _analyze_code_patterns(self, filepath):
-        """Intelligent pattern analysis with exact line numbers."""
+        """Analyze a Python file for common code-quality issues."""
         findings = []
 
         try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                content = f.read()
-                lines = content.split("\n")
+            with open(filepath, "r", encoding="utf-8") as file:
+                content = file.read()
 
-            # Check for long methods with exact locations.
-            method_pattern = r"def\s+(\w+)\s*\("
-            methods = list(re.finditer(method_pattern, content))
+            lines = content.splitlines()
 
-            for i, method_match in enumerate(methods):
-                start_line = (
-                    content[: method_match.start()].count("\n") + 1
+            findings.extend(
+                self._check_long_methods(
+                    filepath,
+                    content,
+                    lines,
                 )
+            )
 
-                end_line = (
-                    content[: methods[i + 1].start()].count("\n") + 1
-                    if i + 1 < len(methods)
-                    else len(lines)
-                )
+            findings.extend(
+                self._check_missing_type_hints(lines)
+            )
 
-                method_length = end_line - start_line
+            findings.extend(
+                self._check_exception_handling(lines)
+            )
 
-                if method_length > 20:
-                    findings.append(
-                        f"**{filepath}:{start_line}-{end_line}** | "
-                        f"Method `{method_match.group(1)}()` is "
-                        f"{method_length} lines - refactor into smaller functions"
-                    )
+            findings.extend(
+                self._check_missing_docstrings(lines)
+            )
 
-            # Check for missing type hints.
-            missing_type_hints = []
-
-            for line_num, line in enumerate(lines, 1):
-                if re.match(r"\s*def\s+\w+\s*\(", line):
-                    if "->" not in line and "def " in line:
-                        func_name = re.search(r"def\s+(\w+)", line)
-
-                        if func_name:
-                            missing_type_hints.append(
-                                func_name.group(1)
-                            )
-
-            if missing_type_hints:
-                findings.append(
-                    f"**Type Hints Missing** | "
-                    f"Add return types to: "
-                    f"`{', '.join(missing_type_hints)}`"
-                )
-
-            # Check for bare except blocks.
-            except_issues = []
-
-            for line_num, line in enumerate(lines, 1):
-                if re.search(r"except\s*:", line):
-                    except_issues.append(f"line {line_num}")
-
-                elif "except Exception" in line:
-                    except_issues.append(
-                        f"line {line_num} (generic Exception)"
-                    )
-
-            if except_issues:
-                findings.append(
-                    f"**Exception Handling** | "
-                    f"Fix bare except clauses at "
-                    f"{', '.join(except_issues)}"
-                )
-
-            # Check for missing docstrings.
-            missing_docs = []
-
-            for line_num, line in enumerate(lines, 1):
-                if re.match(r"\s*def\s+\w+", line):
-                    next_lines = lines[
-                        line_num : min(line_num + 3, len(lines))
-                    ]
-
-                    has_docstring = any(
-                        '"""' in l or "'''" in l
-                        for l in next_lines
-                    )
-
-                    if not has_docstring:
-                        func_name = re.search(
-                            r"def\s+(\w+)",
-                            line,
-                        )
-
-                        if func_name:
-                            missing_docs.append(
-                                func_name.group(1)
-                            )
-
-            if missing_docs:
-                findings.append(
-                    f"**Missing Docstrings** | "
-                    f"Add to: `{', '.join(missing_docs)}`"
-                )
-
-        except Exception:
-            # A single file should not cause the entire review to fail.
+        except (OSError, UnicodeDecodeError):
+            # Ignore files that cannot be read.
             pass
 
         return findings
 
+    def _check_long_methods(self, filepath, content, lines):
+        """Find methods that are longer than 20 lines."""
+        findings = []
+        method_pattern = r"def\s+(\w+)\s*\("
+        methods = list(re.finditer(method_pattern, content))
+
+        for index, method_match in enumerate(methods):
+            start_line = (
+                content[:method_match.start()].count("\n") + 1
+            )
+
+            if index + 1 < len(methods):
+                end_line = (
+                    content[:methods[index + 1].start()].count("\n")
+                    + 1
+                )
+            else:
+                end_line = len(lines)
+
+            method_length = end_line - start_line
+
+            if method_length > 20:
+                findings.append(
+                    f"**{filepath}:{start_line}-{end_line}** | "
+                    f"`{method_match.group(1)}()` is "
+                    f"{method_length} lines long."
+                )
+
+        return findings
+
+    def _check_missing_type_hints(self, lines):
+        """Find functions without return type hints."""
+        functions = []
+
+        for line in lines:
+            if re.match(r"\s*def\s+\w+\s*\(", line):
+                if "->" not in line:
+                    match = re.search(r"def\s+(\w+)", line)
+
+                    if match:
+                        functions.append(match.group(1))
+
+        if not functions:
+            return []
+
+        return [
+            "**Missing return type hints** | "
+            f"Add return types to: `{', '.join(functions)}`"
+        ]
+
+    def _check_exception_handling(self, lines):
+        """Find bare or overly broad exception handlers."""
+        issues = []
+
+        for line_number, line in enumerate(lines, 1):
+            if re.search(r"except\s*:", line):
+                issues.append(f"line {line_number}")
+
+            elif "except Exception" in line:
+                issues.append(
+                    f"line {line_number} (generic Exception)"
+                )
+
+        if not issues:
+            return []
+
+        return [
+            "**Exception handling** | "
+            f"Review exception handling at {', '.join(issues)}"
+        ]
+
+    def _check_missing_docstrings(self, lines):
+        """Find functions that appear to lack docstrings."""
+        functions = []
+
+        for line_number, line in enumerate(lines, 1):
+            if not re.match(r"\s*def\s+\w+", line):
+                continue
+
+            match = re.search(r"def\s+(\w+)", line)
+
+            if not match:
+                continue
+
+            next_lines = lines[
+                line_number:min(
+                    line_number + 3,
+                    len(lines),
+                )
+            ]
+
+            has_docstring = any(
+                '"""' in current_line
+                or "'''" in current_line
+                for current_line in next_lines
+            )
+
+            if not has_docstring:
+                functions.append(match.group(1))
+
+        if not functions:
+            return []
+
+        return [
+            "**Missing docstrings** | "
+            f"Add docstrings to: `{', '.join(functions)}`"
+        ]
+
     def _analyze_diff_quality(self, diff):
-        """Analyze the diff for architectural concerns."""
+        """Analyze newly added lines for simple quality issues."""
         suggestions = []
-        print_issues = []
-        todo_issues = []
+        print_lines = []
+        todo_lines = []
+        wildcard_imports = []
 
-        for line_num, line in enumerate(diff.split("\n"), 1):
-            # Collect newly added print statements.
-            if "print(" in line and line.startswith("+"):
-                print_issues.append(line_num)
+        for line_number, line in enumerate(diff.splitlines(), 1):
+            if not line.startswith("+") or line.startswith("+++"):
+                continue
 
-            # Collect newly added TODO/FIXME comments.
-            if (
-                ("TODO" in line or "FIXME" in line)
-                and line.startswith("+")
-            ):
-                todo_issues.append(line_num)
+            if "print(" in line:
+                print_lines.append(line_number)
 
-            # Detect wildcard imports.
-            if "import *" in line and line.startswith("+"):
+            if "TODO" in line or "FIXME" in line:
+                todo_lines.append(line_number)
+
+            if "import *" in line:
                 module = re.search(
                     r"from\s+(\S+)\s+import\s+\*",
                     line,
                 )
 
                 if module:
-                    suggestions.append(
-                        f"**Avoid wildcard imports** | "
-                        f"Use explicit imports instead of "
-                        f"`from {module.group(1)} import *`"
-                    )
+                    wildcard_imports.append(module.group(1))
 
-        # Group print statements.
-        if print_issues:
-            sample = (
-                f"line {print_issues[0]}"
-                if len(print_issues) == 1
-                else f"{len(print_issues)} lines"
-            )
-
+        if print_lines:
             suggestions.append(
-                f"**Replace print() with logging** | "
-                f"Found {len(print_issues)} print() calls "
-                f"({sample}) - use `import logging` instead"
+                f"**Logging** | Replace {len(print_lines)} "
+                "new `print()` call(s) with logging."
             )
 
-        # Group TODO/FIXME comments.
-        if todo_issues:
-            sample = (
-                f"line {todo_issues[0]}"
-                if len(todo_issues) == 1
-                else f"{len(todo_issues)} locations"
-            )
-
+        if todo_lines:
             suggestions.append(
-                f"**Remove TODO/FIXME comments** | "
-                f"Implement immediately or open GitHub issues "
-                f"({sample})"
+                f"**TODO/FIXME** | Review {len(todo_lines)} "
+                "new TODO/FIXME comment(s)."
             )
 
-        large_file_additions = len(
-            [
-                line
-                for line in diff.split("\n")
-                if line.startswith("+")
-            ]
+        for module in sorted(set(wildcard_imports)):
+            suggestions.append(
+                f"**Wildcard import** | Replace "
+                f"`from {module} import *` with explicit imports."
+            )
+
+        additions = sum(
+            1
+            for line in diff.splitlines()
+            if line.startswith("+")
+            and not line.startswith("+++")
         )
 
-        if large_file_additions > 100:
+        if additions > 100:
             suggestions.append(
-                f"**Consider smaller PRs** | "
-                f"This PR has {large_file_additions} additions - "
-                f"break into smaller focused changes"
+                f"**PR size** | {additions} lines added. "
+                "Consider splitting the change."
             )
 
         return suggestions
 
-    def format_review_comment(self, review):
-        """Format review with crisp, clear guidance for developers."""
-        code_findings = review.get("code_findings", [])
-        security_findings = review.get("security_findings", [])
-        suggested_fixes = review.get("suggested_fixes", [])
-
-        status = review.get(
-            "validation_status",
-            "unknown",
-        ).upper()
-
-        if status == "PASSED":
-            status_line = "✅ **Tests: PASSED**"
-        else:
-            status_line = (
-                "❌ **Tests: FAILED** - Fix before merging"
-            )
-
-        sections = []
-
-        # Show changed files.
-        changed_files = review.get("changed_files", [])
-
-        if changed_files:
-            sections.append(
-                "## Files Reviewed\n"
-                + "\n".join(
-                    f"- `{file_path}`"
-                    for file_path in changed_files
-                )
-            )
-
-        # Code quality issues.
-        if code_findings:
-            quality_items = []
-
-            for finding in code_findings:
-                if isinstance(finding, dict):
-                    file_path = finding.get("file")
-                    message = finding.get("message", str(finding))
-                    line = finding.get("line")
-
-                    location = ""
-
-                    if file_path:
-                        location = f"`{file_path}`"
-
-                    if line:
-                        location += f":{line}"
-
-                    if location:
-                        quality_items.append(
-                            f"- {location} — {message}"
-                        )
-                    else:
-                        quality_items.append(
-                            f"- {message}"
-                        )
-                else:
-                    quality_items.append(
-                        f"- {finding}"
-                    )
-
-            sections.append(
-                "## Issues Found\n"
-                + "\n".join(quality_items)
-            )
-        else:
-            sections.append(
-                "## Issues Found\n- ✅ None"
-            )
-
-        # Action items.
-        if suggested_fixes:
-            action_items = []
-
-            for i, fix in enumerate(
-                suggested_fixes,
-                1,
-            ):
-                action_items.append(
-                    f"{i}. {fix}"
-                )
-
-            sections.append(
-                "## Next Steps\n"
-                + "\n".join(action_items)
-            )
-
-        # Security issues.
-        if security_findings:
-            security_items = []
-
-            for finding in security_findings:
-                if isinstance(finding, dict):
-                    file_path = finding.get("file")
-                    message = finding.get(
-                        "message",
-                        str(finding),
-                    )
-                    line = finding.get("line")
-
-                    location = ""
-
-                    if file_path:
-                        location = f"`{file_path}`"
-
-                    if line:
-                        location += f":{line}"
-
-                    if location:
-                        security_items.append(
-                            f"- {location} — {message}"
-                        )
-                    else:
-                        security_items.append(
-                            f"- {message}"
-                        )
-                else:
-                    security_items.append(
-                        f"- {finding}"
-                    )
-
-            sections.append(
-                "## ⚠️ Security Issues\n"
-                + "\n".join(security_items)
-            )
-
-        return (
-            f"## Review Summary\n\n"
-            f"{review.get('summary', '')}\n\n"
-            f"{status_line}\n\n"
-            f"{''.join(s + chr(10) + chr(10) for s in sections)}"
-            f"---\n"
-            f"*Auto-generated by Code Review Agent*"
-        )
-
-    def review(self):
-        """Perform intelligent local code review."""
-        diff = self.git_diff_tool.get_diff()
-
-        # Dynamically discover files changed relative to main.
-        changed_files = self.git_diff_tool.get_changed_files()
-
-        # Only Python files can currently be analyzed by the
-        # Python AST-based analysis tools.
-        python_files = [
+    def _get_reviewed_python_files(self, changed_files):
+        """Return changed Python files that still exist."""
+        return [
             file_path
             for file_path in changed_files
             if Path(file_path).suffix == ".py"
             and Path(file_path).exists()
         ]
 
-        all_code_findings = []
-        all_security_findings = []
+    def _analyze_files(self, python_files):
+        """Run code and security analysis on changed Python files."""
+        code_findings = []
+        security_findings = []
 
-        # Review every changed Python file.
         for file_path in python_files:
-            code_findings = (
-                self.code_analysis_tool.analyze_file(
-                    file_path
-                )
+            ast_findings = self.code_analysis_tool.analyze_file(
+                file_path
             )
 
-            pattern_findings = (
-                self._analyze_code_patterns(
-                    file_path
-                )
+            pattern_findings = self._analyze_code_patterns(
+                file_path
             )
 
-            security_findings = (
+            file_findings = (
+                pattern_findings
+                if pattern_findings
+                else ast_findings
+            )
+
+            for finding in file_findings:
+                if isinstance(finding, dict):
+                    finding["file"] = file_path
+
+            file_security_findings = (
                 self.security_analysis_tool.analyze_file(
                     file_path
                 )
             )
 
-            # Prefer pattern findings when available.
-            file_code_findings = (
-                pattern_findings
-                if pattern_findings
-                else code_findings
-            )
-
-            # Add file context to dictionary-based findings.
-            for finding in file_code_findings:
+            for finding in file_security_findings:
                 if isinstance(finding, dict):
                     finding["file"] = file_path
+
+            code_findings.extend(file_findings)
+            security_findings.extend(file_security_findings)
+
+        return code_findings, security_findings
+
+    def _build_summary(
+        self,
+        code_findings,
+        security_findings,
+        tests_passed,
+    ):
+        """Build a short review summary."""
+        issue_count = (
+            len(code_findings)
+            + len(security_findings)
+        )
+
+        if not tests_passed:
+            return (
+                "🔴 **Changes need attention** — "
+                "tests are failing."
+            )
+
+        if issue_count == 0:
+            return (
+                "🟢 **Ready to merge** — "
+                "tests passed and no issues were found."
+            )
+
+        if security_findings:
+            priority = "🔴 HIGH"
+        else:
+            priority = "⚠️ MEDIUM"
+
+        return (
+            f"{priority} — **{issue_count} issue(s) found**. "
+            "See the review details below."
+        )
+
+    def format_review_comment(self, review):
+        """Create a concise GitHub PR review comment."""
+        code_findings = review.get("code_findings", [])
+        security_findings = review.get(
+            "security_findings",
+            [],
+        )
+        test_results = review.get(
+            "test_results",
+            {},
+        )
+
+        tests_passed = test_results.get(
+            "passed",
+            False,
+        )
+
+        total_issues = (
+            len(code_findings)
+            + len(security_findings)
+        )
+
+        if not tests_passed:
+            status_text = "❌ FAIL"
+        elif total_issues > 0:
+            status_text = "⚠️ CHANGES REQUESTED"
+        else:
+            status_text = "✅ PASS"
+
+        lines = [
+            "## 🤖 Code Review",
+            "",
+            f"**Status:** {status_text}",
+            (
+                f"**Tests:** "
+                f"{'✅ Passed' if tests_passed else '❌ Failed'}"
+            ),
+            "",
+        ]
+
+        if total_issues == 0:
+            lines.extend(
+                [
+                    "### Result",
+                    "✅ No issues found.",
+                ]
+            )
+        else:
+            lines.append(
+                f"### Issues ({total_issues})"
+            )
+
+            displayed = 0
+            max_findings = 5
+
+            for finding in code_findings:
+                if displayed >= max_findings:
+                    break
+
+                lines.append(
+                    self._format_finding(finding)
+                )
+                displayed += 1
 
             for finding in security_findings:
-                if isinstance(finding, dict):
-                    finding["file"] = file_path
+                if displayed >= max_findings:
+                    break
 
-            all_code_findings.extend(
-                file_code_findings
-            )
+                lines.append(
+                    f"- 🚨 {self._format_finding(finding)}"
+                )
+                displayed += 1
 
-            all_security_findings.extend(
-                security_findings
-            )
+            remaining = total_issues - displayed
 
-        # Analyze the complete diff.
-        diff_suggestions = (
-            self._analyze_diff_quality(diff)
+            if remaining > 0:
+                lines.append(
+                    f"- _{remaining} additional issue(s) detected._"
+                )
+
+        lines.extend(
+            [
+                "",
+                "---",
+                "_Generated by Code Review Agent_",
+            ]
         )
 
-        all_suggestions = diff_suggestions.copy()
+        return "\n".join(lines)
 
-        # Run the project's test suite.
-        test_results = (
-            self.test_runner_tool.run_tests()
+    @staticmethod
+    def _format_finding(finding):
+        """Convert a finding into a compact review bullet."""
+        if isinstance(finding, dict):
+            file_path = finding.get("file", "")
+            line = finding.get("line")
+            message = finding.get(
+                "message",
+                str(finding),
+            )
+
+            location = file_path
+
+            if line:
+                location = f"{location}:{line}"
+
+            if location:
+                return f"- `{location}` — {message}"
+
+            return f"- {message}"
+
+        return f"- {finding}"
+
+    def review(self):
+        """Perform a complete local code review."""
+        diff = self.git_diff_tool.get_diff()
+        changed_files = self.git_diff_tool.get_changed_files()
+
+        python_files = self._get_reviewed_python_files(
+            changed_files
         )
+
+        code_findings, security_findings = (
+            self._analyze_files(python_files)
+        )
+
+        diff_suggestions = self._analyze_diff_quality(
+            diff
+        )
+
+        test_results = self.test_runner_tool.run_tests()
 
         tests_passed = test_results.get(
             "passed",
@@ -475,57 +493,20 @@ class LocalReviewOrchestrator:
             else "failed"
         )
 
-        issues_count = (
-            len(all_code_findings)
-            + len(all_security_findings)
+        summary = self._build_summary(
+            code_findings,
+            security_findings,
+            tests_passed,
         )
-
-        if status == "failed":
-            summary = (
-                "🔴 **Tests are failing** - "
-                "Please fix before requesting merge review."
-            )
-
-        elif issues_count == 0 and tests_passed:
-            summary = (
-                "🟢 **Ready to merge!** "
-                "Code quality looks good, all tests passing."
-            )
-
-        elif issues_count == 0:
-            summary = (
-                "🟢 **Code quality approved** - "
-                "Tests passing, no issues found."
-            )
-
-        else:
-            priority = (
-                "⚠️ **HIGH**"
-                if all_security_findings
-                else "**MEDIUM**"
-            )
-
-            summary = (
-                f"{priority} **{issues_count} issue(s) to fix** "
-                "- See details below."
-            )
-
-        if not all_suggestions:
-            if issues_count == 0:
-                all_suggestions = []
-            else:
-                all_suggestions = [
-                    "Address the issues listed above before merging"
-                ]
 
         review_result = {
             "diff": diff,
             "changed_files": changed_files,
-            "code_findings": all_code_findings,
-            "security_findings": all_security_findings,
+            "code_findings": code_findings,
+            "security_findings": security_findings,
             "test_results": test_results,
             "summary": summary,
-            "suggested_fixes": all_suggestions,
+            "suggested_fixes": diff_suggestions,
             "validation_status": status,
         }
 
@@ -555,4 +536,3 @@ if __name__ == "__main__":
     print()
     print("Review comment:")
     print(review["comment"])
-
